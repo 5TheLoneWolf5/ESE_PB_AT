@@ -1,5 +1,14 @@
-## 1. Nome do Projeto
+## 1. Introdução
 **FinTech Bank - Sistema Bancário Distribuído com Arquitetura de Microsserviços e Padrão Saga**
+
+### Vídeo de Apresentação:
+
+
+
+### Diagrama de Domínio:
+
+<img width="762" height="442" alt="Domínio_Banco" src="https://github.com/user-attachments/assets/fadb6958-a14b-46a8-8ad6-b17feb71b52c" />
+
 
 ## 2. Proposta e Tema
 
