@@ -39,7 +39,7 @@ public class DebitarContaUseCase {
         this.objectMapper = objectMapper;
     }
 
-    @Transactional
+    @Transactional(noRollbackFor = SaldoInsuficienteException.class)
     public void execute(Long contaId, BigDecimal valor, String chaveIdempotencia, Long transferenciaId) {
         if (chaveIdempotencia != null && !chaveIdempotencia.isBlank()) {
             if (idempotenciaRepository.existsById(chaveIdempotencia)) {

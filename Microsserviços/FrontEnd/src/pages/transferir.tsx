@@ -162,14 +162,13 @@ export default function TransferirPage() {
         if (
           atual.status === 'CONCLUIDA' ||
           atual.status === 'DEBITO_FALHOU' ||
-          atual.status === 'CREDITO_FALHOU' ||
           atual.status === 'COMPENSADA' ||
-          attempts >= 10
+          atual.status === 'COMPENSACAO_FALHOU' ||
+          attempts >= 20
         ) {
           clearInterval(interval);
           setPollingStatus(false);
-          await refreshContas();
-          await refreshTransferencias();
+          await Promise.all([refreshContas(), refreshTransferencias()]);
         }
       } catch {
         clearInterval(interval);
@@ -183,8 +182,11 @@ export default function TransferirPage() {
       case 'INICIADA':
         return 1;
       case 'CONTA_ORIGEM_DEBITADA':
+      case 'CREDITO_FALHOU':
         return 2;
       case 'CONCLUIDA':
+      case 'COMPENSADA':
+      case 'COMPENSACAO_FALHOU':
         return 3;
       default:
         return status ? 2 : 0;
@@ -440,15 +442,40 @@ export default function TransferirPage() {
                   <Step
                     completed={
                       transferenciaCriada.status === 'CONTA_ORIGEM_DEBITADA' ||
-                      transferenciaCriada.status === 'CONCLUIDA'
+                      transferenciaCriada.status === 'CONCLUIDA' ||
+                      transferenciaCriada.status === 'CREDITO_FALHOU' ||
+                      transferenciaCriada.status === 'COMPENSADA' ||
+                      transferenciaCriada.status === 'COMPENSACAO_FALHOU'
                     }
                   >
                     <StepLabel>Débito na Conta Origem (ContaService)</StepLabel>
                   </Step>
                   <Step completed={transferenciaCriada.status === 'CONCLUIDA'}>
-                    <StepLabel>Crédito no Destino & Conclusão da Saga</StepLabel>
+                    <StepLabel>
+                      {transferenciaCriada.status === 'COMPENSADA'
+                        ? 'Crédito Falhou & Estorno Concluído'
+                        : 'Crédito no Destino & Conclusão da Saga'}
+                    </StepLabel>
                   </Step>
                 </Stepper>
+
+                {transferenciaCriada.status === 'COMPENSADA' && (
+                  <Alert severity="warning" sx={{ mt: 2 }}>
+                    O crédito no destino falhou. O rollback da Saga (compensação) foi executado com sucesso e o saldo foi estornado para a conta de origem!
+                  </Alert>
+                )}
+
+                {transferenciaCriada.status === 'CREDITO_FALHOU' && (
+                  <Alert severity="info" sx={{ mt: 2 }}>
+                    O crédito no destino falhou. Processando estorno (compensação) para a conta de origem...
+                  </Alert>
+                )}
+
+                {transferenciaCriada.status === 'DEBITO_FALHOU' && (
+                  <Alert severity="error" sx={{ mt: 2 }}>
+                    O débito inicial falhou (saldo insuficiente ou erro na conta). Nenhuma alteração foi realizada.
+                  </Alert>
+                )}
 
                 <Button
                   fullWidth

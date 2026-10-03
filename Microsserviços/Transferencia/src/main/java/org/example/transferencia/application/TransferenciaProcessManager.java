@@ -3,6 +3,7 @@ package org.example.transferencia.application;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
+import java.time.LocalDateTime;
 import java.util.List;
 import org.example.transferencia.domain.StatusTransferencia;
 import org.example.transferencia.domain.Transferencia;
@@ -45,6 +46,21 @@ public class TransferenciaProcessManager {
         try {
             JsonNode root = objectMapper.readTree(mensagemJson);
             String eventType = root.has("eventType") ? root.get("eventType").asText() : "";
+
+            // Fallback para inferir tipo do evento caso payload legado venha sem eventType
+            if (eventType == null || eventType.isBlank()) {
+                if (root.has("motivo")) {
+                    eventType = "DebitoRejeitado";
+                } else if (root.has("chaveIdempotencia")) {
+                    String chave = root.get("chaveIdempotencia").asText();
+                    if (chave.endsWith("-debito")) {
+                        eventType = "ContaDebitada";
+                    } else if (chave.endsWith("-credito") || chave.endsWith("-compensacao")) {
+                        eventType = "ContaCreditada";
+                    }
+                }
+            }
+
             Long transferenciaId = root.has("transferenciaId") ? root.get("transferenciaId").asLong() : null;
 
             if (transferenciaId == null) {
@@ -57,6 +73,9 @@ public class TransferenciaProcessManager {
                 log.warn("Transferencia {} nao encontrada para o evento {}", transferenciaId, eventType);
                 return;
             }
+
+            log.info("Processando evento {} para transferencia {} (status atual: {})",
+                    eventType, transferenciaId, transferencia.getStatus());
 
             switch (eventType) {
                 case "ContaDebitada" -> aoReceberContaDebitada(transferencia);
@@ -119,9 +138,13 @@ public class TransferenciaProcessManager {
         iniciarCompensacao(transferencia, motivo);
     }
 
-    private void iniciarCompensacao(Transferencia transferencia, String motivo) {
-        if (transferencia.getStatus() == StatusTransferencia.CONTA_ORIGEM_DEBITADA) {
-            log.warn("Credito falhou para transferencia {}. Transicionando para CREDITO_FALHOU e compensando.", transferencia.getId());
+    public void iniciarCompensacao(Transferencia transferencia, String motivo) {
+        if (transferencia.getStatus() == StatusTransferencia.CONTA_ORIGEM_DEBITADA
+                || transferencia.getStatus() == StatusTransferencia.INICIADA) {
+            log.warn("Credito falhou ou timeout para transferencia {}. Transicionando para CREDITO_FALHOU e compensando.", transferencia.getId());
+            if (transferencia.getStatus() == StatusTransferencia.INICIADA) {
+                transferencia.confirmarDebito();
+            }
             transferencia.falharCredito(motivo);
             salvarEGravarOutbox(transferencia);
 
@@ -157,10 +180,23 @@ public class TransferenciaProcessManager {
     @Scheduled(fixedDelay = 30000)
     @Transactional
     public void watchdogTimeoutTransfers() {
-        List<Transferencia> travadas = transferenciaRepository.findByStatus(StatusTransferencia.CONTA_ORIGEM_DEBITADA);
-        for (Transferencia t : travadas) {
-            log.warn("Watchdog detectou transferencia travada em CONTA_ORIGEM_DEBITADA: id={}. Forcando compensacao.", t.getId());
-            iniciarCompensacao(t, "Timeout aguardando confirmacao de credito");
+        LocalDateTime limite = LocalDateTime.now().minusSeconds(30);
+
+        List<Transferencia> travadasEmDebito = transferenciaRepository.findByStatus(StatusTransferencia.CONTA_ORIGEM_DEBITADA);
+        for (Transferencia t : travadasEmDebito) {
+            if (t.getDataAtualizacao() == null || t.getDataAtualizacao().isBefore(limite)) {
+                log.warn("Watchdog detectou transferencia travada em CONTA_ORIGEM_DEBITADA: id={}. Forcando compensacao.", t.getId());
+                iniciarCompensacao(t, "Timeout aguardando confirmacao de credito");
+            }
+        }
+
+        List<Transferencia> travadasEmIniciada = transferenciaRepository.findByStatus(StatusTransferencia.INICIADA);
+        for (Transferencia t : travadasEmIniciada) {
+            if (t.getDataCriacao() == null || t.getDataCriacao().isBefore(limite)) {
+                log.warn("Watchdog detectou transferencia travada em INICIADA: id={}. Forcando compensacao.", t.getId());
+                iniciarCompensacao(t, "Timeout aguardando evento ContaDebitada");
+            }
         }
     }
 }
+

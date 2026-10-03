@@ -1,5 +1,8 @@
 package org.example.conta.infrastructure.messaging;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.util.List;
 import org.example.conta.infrastructure.persistence.ContaOutboxMessage;
 import org.example.conta.infrastructure.persistence.ContaOutboxRepository;
@@ -17,10 +20,16 @@ public class ContaOutboxPublisher {
 
     private final ContaOutboxRepository outboxRepository;
     private final KafkaTemplate<String, String> kafkaTemplate;
+    private final ObjectMapper objectMapper;
 
-    public ContaOutboxPublisher(ContaOutboxRepository outboxRepository, KafkaTemplate<String, String> kafkaTemplate) {
+    public ContaOutboxPublisher(
+            ContaOutboxRepository outboxRepository,
+            KafkaTemplate<String, String> kafkaTemplate,
+            ObjectMapper objectMapper
+    ) {
         this.outboxRepository = outboxRepository;
         this.kafkaTemplate = kafkaTemplate;
+        this.objectMapper = objectMapper;
     }
 
     @Scheduled(fixedDelay = 2000)
@@ -29,7 +38,20 @@ public class ContaOutboxPublisher {
         List<ContaOutboxMessage> pendentes = outboxRepository.findByPublicadoFalseOrderByCriadoEmAsc();
         for (ContaOutboxMessage msg : pendentes) {
             try {
-                kafkaTemplate.send("conta-events", String.valueOf(msg.getAggregateId()), msg.getPayload());
+                String payload = msg.getPayload();
+                if (msg.getEventType() != null) {
+                    try {
+                        JsonNode node = objectMapper.readTree(payload);
+                        if (node.isObject() && (!node.has("eventType") || node.get("eventType").asText().isBlank())) {
+                            ((ObjectNode) node).put("eventType", msg.getEventType());
+                            payload = objectMapper.writeValueAsString(node);
+                        }
+                    } catch (Exception ex) {
+                        log.warn("Nao foi possivel enriquecer payload outbox: {}", ex.getMessage());
+                    }
+                }
+
+                kafkaTemplate.send("conta-events", String.valueOf(msg.getAggregateId()), payload);
                 msg.marcarComoPublicado();
                 outboxRepository.save(msg);
                 log.info("Evento publicado no Kafka a partir do ContaOutbox: id={}, tipo={}", msg.getId(), msg.getEventType());
@@ -40,3 +62,4 @@ public class ContaOutboxPublisher {
         }
     }
 }
+
