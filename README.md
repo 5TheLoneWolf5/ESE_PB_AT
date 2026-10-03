@@ -3,12 +3,11 @@
 
 ### Vídeo de Apresentação:
 
-
+https://github.com/user-attachments/assets/f7ba5527-2510-4195-a38e-6ede9e870e6a
 
 ### Diagrama de Domínio:
 
 <img width="762" height="442" alt="Domínio_Banco" src="https://github.com/user-attachments/assets/fadb6958-a14b-46a8-8ad6-b17feb71b52c" />
-
 
 ## 2. Proposta e Tema
 
